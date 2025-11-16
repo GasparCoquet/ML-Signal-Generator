@@ -10,29 +10,154 @@ import numpy as np
 from typing import Tuple
 
 
-def download_data(ticker: str, start_date: str, end_date: str) -> pd.DataFrame:
+def download_data(
+    ticker: str, 
+    start_date: str, 
+    end_date: str,
+    api_source: str = 'yfinance',
+    api_key: str = None
+) -> pd.DataFrame:
     """
-    Download OHLC data using yfinance.
+    Download OHLC data using various APIs.
     
     Args:
         ticker: Stock ticker symbol (e.g., 'SPY' for S&P 500)
         start_date: Start date in 'YYYY-MM-DD' format
         end_date: End date in 'YYYY-MM-DD' format
+        api_source: API to use ('yfinance' or 'alpha_vantage')
+        api_key: API key (required for alpha_vantage)
     
     Returns:
         DataFrame with columns: Open, High, Low, Close, Volume
     """
+    if api_source == 'yfinance':
+        return _download_yfinance(ticker, start_date, end_date)
+    elif api_source == 'alpha_vantage':
+        if not api_key:
+            raise ValueError("API key required for Alpha Vantage. Get a free key at https://www.alphavantage.co/support/#api-key")
+        return _download_alpha_vantage(ticker, start_date, end_date, api_key)
+    else:
+        raise ValueError(f"Unknown API source: {api_source}. Choose 'yfinance' or 'alpha_vantage'")
+
+
+def _download_yfinance(ticker: str, start_date: str, end_date: str) -> pd.DataFrame:
+    """Download data using yfinance with improved error handling."""
     import yfinance as yf
+    import time
     
-    data = yf.download(ticker, start=start_date, end=end_date, progress=False)
+    try:
+        # Try using Ticker object first (more reliable)
+        ticker_obj = yf.Ticker(ticker)
+        data = ticker_obj.history(start=start_date, end=end_date)
+        
+        if data.empty:
+            # Fallback to download method
+            time.sleep(1)  # Small delay to avoid rate limiting
+            data = yf.download(ticker, start=start_date, end=end_date, progress=False)
+    except Exception as e:
+        # Fallback to standard download
+        time.sleep(2)  # Delay before retry
+        data = yf.download(ticker, start=start_date, end=end_date, progress=False)
     
-    # Flatten MultiIndex columns if present (yfinance returns MultiIndex for single ticker)
+    # Flatten MultiIndex columns if present
     if isinstance(data.columns, pd.MultiIndex):
         data.columns = data.columns.get_level_values(0)
     
     # Ensure we have the required columns
+    if data.empty:
+        raise ValueError(
+            f"yfinance returned empty data for {ticker}. "
+            f"This usually means rate limiting or invalid ticker. "
+            f"Try waiting 15-20 minutes or use an alternative API."
+        )
     if 'Close' not in data.columns:
-        raise ValueError(f"Failed to download data for {ticker}")
+        raise ValueError(f"yfinance data missing 'Close' column for {ticker}")
+    
+    return data
+
+
+def _download_alpha_vantage(ticker: str, start_date: str, end_date: str, api_key: str) -> pd.DataFrame:
+    """Download data using Alpha Vantage API."""
+    import requests
+    from datetime import datetime
+    
+    # Alpha Vantage only provides daily data
+    # Use TIME_SERIES_DAILY (free) instead of TIME_SERIES_DAILY_ADJUSTED (premium)
+    url = 'https://www.alphavantage.co/query'
+    params = {
+        'function': 'TIME_SERIES_DAILY',  # Free endpoint (not ADJUSTED which is premium)
+        'symbol': ticker,
+        'outputsize': 'full',
+        'apikey': api_key,
+        'datatype': 'json'
+    }
+    
+    response = requests.get(url, params=params, timeout=10)
+    response.raise_for_status()
+    data_json = response.json()
+    
+    # Check for API errors first
+    if 'Error Message' in data_json:
+        raise ValueError(f"Alpha Vantage API Error: {data_json['Error Message']}")
+    if 'Note' in data_json:
+        raise ValueError(f"Alpha Vantage Rate Limit: {data_json['Note']}")
+    
+    # Check for invalid API key or other info messages
+    if 'Information' in data_json:
+        info_msg = data_json['Information']
+        if 'API key' in info_msg.lower() or 'invalid' in info_msg.lower():
+            raise ValueError(f"Alpha Vantage API Key Error: {info_msg}")
+        else:
+            raise ValueError(f"Alpha Vantage API Info: {info_msg}")
+    
+    # Parse the data - TIME_SERIES_DAILY returns 'Time Series (Daily)'
+    time_series = data_json.get('Time Series (Daily)', {})
+    
+    if not time_series:
+        # Provide more diagnostic info
+        available_keys = list(data_json.keys())
+        error_details = f"Response keys: {available_keys}"
+        
+        # Check if there's a meta data section that might give clues
+        if 'Meta Data' in data_json:
+            meta = data_json['Meta Data']
+            error_details += f"\nMeta Data: {meta}"
+        
+        raise ValueError(
+            f"No data returned for {ticker} from Alpha Vantage.\n"
+            f"{error_details}\n"
+            f"Possible issues:\n"
+            f"1. Invalid or expired API key\n"
+            f"2. Invalid ticker symbol\n"
+            f"3. API rate limit exceeded\n"
+            f"4. Try using 'yfinance' instead: Set API_SOURCE=yfinance in .env"
+        )
+    
+    # Convert to DataFrame
+    start_dt = pd.to_datetime(start_date)
+    end_dt = pd.to_datetime(end_date)
+    
+    records = []
+    for date_str, values in time_series.items():
+        date = pd.to_datetime(date_str)
+        if start_dt <= date <= end_dt:
+            # TIME_SERIES_DAILY uses different keys than ADJUSTED
+            # Keys: '1. open', '2. high', '3. low', '4. close', '5. volume'
+            records.append({
+                'Date': date,
+                'Open': float(values['1. open']),
+                'High': float(values['2. high']),
+                'Low': float(values['3. low']),
+                'Close': float(values['4. close']),
+                'Volume': int(values['5. volume'])  # Note: '5. volume' not '6. volume' for non-adjusted
+            })
+    
+    if not records:
+        raise ValueError(f"No data found for {ticker} in date range {start_date} to {end_date}")
+    
+    data = pd.DataFrame(records)
+    data.set_index('Date', inplace=True)
+    data.sort_index(inplace=True)
     
     return data
 
