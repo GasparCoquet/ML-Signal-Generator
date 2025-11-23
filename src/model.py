@@ -119,8 +119,7 @@ def train_xgboost(
         max_depth=max_depth,
         learning_rate=learning_rate,
         random_state=random_state,
-        eval_metric='auc',
-        use_label_encoder=False
+        eval_metric='auc'
     )
     
     # Train model
