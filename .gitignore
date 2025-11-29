@@ -28,6 +28,7 @@ data/*.pkl
 # IDE
 .vscode/
 .idea/
+.cursor/
 *.swp
 *.swo
 
