@@ -82,6 +82,9 @@ In the notebook, you can modify:
 - `TICKER`: Stock ticker symbol (default: 'SPY')
 - `START_DATE` / `END_DATE`: Date range for data
 - `SIGNAL_THRESHOLD`: Probability threshold for signal generation (default: 0.55)
+- `transaction_cost`: Per-trade transaction cost used in backtesting
+  (expressed in return space, e.g. 2 bps = 0.0002, applied as
+  \\( \\text{Net\\_Return}_t = \\text{Gross\\_Return}_t - (\\text{Cost} \\times |\\text{Signal}_t - \\text{Signal}_{t-1}|) \\))
 
 *Note: Both Random Forest and XGBoost are automatically trained and compared. The best model is selected based on validation AUC, with XGBoost as the tie-breaker if AUCs are equal.*
 
@@ -145,6 +148,8 @@ The backtest computes:
 - **Sharpe Ratio**: Risk-adjusted return metric
 - **Maximum Drawdown**: Largest peak-to-trough decline
 - **Win Rate**: Percentage of profitable trades
+- **Transaction Costs Impact**: Strategy returns are net of realistic
+  transaction costs based on position changes (turnover)
 
 ## Outputs
 

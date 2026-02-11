@@ -31,7 +31,8 @@ def generate_signals(
 
 def compute_returns_from_signals(
     signals: np.ndarray,
-    returns: pd.Series | np.ndarray
+    returns: pd.Series | np.ndarray,
+    transaction_cost: float = 0.0002,
 ) -> pd.Series | np.ndarray:
     """
     Compute strategy returns from signals and actual returns.
@@ -39,14 +40,43 @@ def compute_returns_from_signals(
     Args:
         signals: Binary trading signals (1 = long, 0 = flat)
         returns: Actual next-day returns (Series or array)
+        transaction_cost: Cost per position change, expressed in
+            return space (e.g. 2 bps = 0.0002). Default is 0.0
     
     Returns:
-        Strategy returns (same type as input returns)
+        Strategy net returns after transaction costs
+        (same type as input returns)
     """
-    # Align signals with returns (signals predict next-day returns)
-    strategy_returns = signals * returns
-    
-    return strategy_returns
+    # Convert to numpy arrays for vectorized computation
+    if isinstance(returns, pd.Series):
+        returns_array = returns.values
+        index = returns.index
+        is_series = True
+    else:
+        returns_array = np.asarray(returns)
+        index = None
+        is_series = False
+
+    signals_array = np.asarray(signals)
+
+    # Gross strategy returns (signals applied to next-period returns)
+    gross_returns = signals_array * returns_array
+
+    # Turnover: |Signal_t - Signal_{t-1}|
+    # Assume we start from flat position at t-1 (signal = 0)
+    prev_signals = np.roll(signals_array, 1)
+    prev_signals[0] = 0
+    turnover = np.abs(signals_array - prev_signals)
+
+    # Transaction cost paid on each position change
+    transaction_fee = transaction_cost * turnover
+
+    net_returns = gross_returns - transaction_fee
+
+    if is_series:
+        return pd.Series(net_returns, index=index)
+
+    return net_returns
 
 
 def compute_equity_curve(returns: pd.Series | np.ndarray, initial_capital: float = 10000.0) -> pd.Series | np.ndarray:
@@ -146,7 +176,8 @@ def compute_performance_metrics(
 def backtest_strategy(
     signals: np.ndarray,
     returns: pd.Series | np.ndarray,
-    initial_capital: float = 10000.0
+    initial_capital: float = 10000.0,
+    transaction_cost: float = 0.0002,
 ) -> Tuple[pd.Series | np.ndarray, Dict[str, float]]:
     """
     Complete backtest pipeline.
@@ -155,12 +186,18 @@ def backtest_strategy(
         signals: Binary trading signals
         returns: Actual next-day returns
         initial_capital: Starting capital
+        transaction_cost: Cost per position change, expressed in
+            return space (e.g. 2 bps = 0.0002). Default is 0.0
     
     Returns:
         Tuple of (equity curve, performance metrics)
     """
-    # Compute strategy returns
-    strategy_returns = compute_returns_from_signals(signals, returns)
+    # Compute strategy returns (net of transaction costs)
+    strategy_returns = compute_returns_from_signals(
+        signals,
+        returns,
+        transaction_cost=transaction_cost,
+    )
     
     # Compute equity curve
     equity = compute_equity_curve(strategy_returns, initial_capital)
