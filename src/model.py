@@ -7,8 +7,10 @@ This module contains functions to train ML models for predicting next-day return
 import pandas as pd
 import numpy as np
 from typing import Tuple, Dict, Any
+from sklearn.base import clone
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.metrics import roc_auc_score, classification_report, confusion_matrix
+from sklearn.model_selection import TimeSeriesSplit
 import xgboost as xgb
 
 
@@ -140,6 +142,40 @@ def train_xgboost(
     }
     
     return model, metrics
+
+
+def train_walk_forward(
+    model: Any,
+    X: pd.DataFrame,
+    y: pd.Series,
+    n_splits: int = 5
+) -> float:
+    """
+    Walk-Forward Validation (expanding window) using TimeSeriesSplit.
+
+    Fits a clone of the model on each train fold and evaluates on the next chunk.
+    Returns the mean validation AUC across folds. The input model is not modified.
+
+    Args:
+        model: Estimator with fit and predict_proba (e.g. RandomForestClassifier, XGBClassifier).
+        X: Feature DataFrame (time-ordered).
+        y: Target Series (time-ordered).
+        n_splits: Number of splits for TimeSeriesSplit.
+
+    Returns:
+        Mean ROC AUC across validation folds.
+    """
+    tscv = TimeSeriesSplit(n_splits=n_splits)
+    scores = []
+    for train_index, val_index in tscv.split(X):
+        X_train, X_val = X.iloc[train_index], X.iloc[val_index]
+        y_train, y_val = y.iloc[train_index], y.iloc[val_index]
+        fold_model = clone(model)
+        fold_model.fit(X_train, y_train)
+        preds = fold_model.predict_proba(X_val)[:, 1]
+        score = roc_auc_score(y_val, preds)
+        scores.append(score)
+    return float(np.mean(scores))
 
 
 def get_feature_importance(model: Any, feature_names: list[str]) -> pd.DataFrame:

@@ -222,6 +222,20 @@ def compute_moving_averages(data: pd.DataFrame, windows: list[int] = [5, 20]) ->
     return df
 
 
+def compute_z_score(data: pd.DataFrame, window: int = 20) -> pd.DataFrame:
+    """
+    Z-Score: (Price - rolling mean) / rolling std.
+    Stationarity-aware: oscillates around 0, better for ML than raw price or MA.
+    """
+    df = data.copy()
+    rolling_mean = df['Close'].rolling(window=window).mean()
+    rolling_std = df['Close'].rolling(window=window).std()
+    df['z_score_20'] = (df['Close'] - rolling_mean) / rolling_std
+    # Avoid inf/nan when std=0
+    df['z_score_20'] = df['z_score_20'].replace([np.inf, -np.inf], np.nan)
+    return df
+
+
 def compute_ma_gap(data: pd.DataFrame, short_window: int = 5, long_window: int = 20) -> pd.DataFrame:
     """
     Compute MA gap (ratio difference between short and long moving averages).
@@ -284,7 +298,8 @@ def engineer_features(
     2. Compute rolling volatility
     3. Compute moving averages
     4. Compute MA gap
-    5. Create binary target
+    5. Z-Score (stationarity-aware)
+    6. Create binary target
     
     Args:
         data: DataFrame with OHLC data
@@ -308,8 +323,11 @@ def engineer_features(
     
     # Step 4: Compute MA gap
     df = compute_ma_gap(df, short_window=ma_windows[0], long_window=ma_windows[1])
-    
-    # Step 5: Create target
+
+    # Step 5: Z-Score (stationarity-aware: oscillates around 0, better for ML)
+    df = compute_z_score(df, window=volatility_window)
+
+    # Step 6: Create target
     df = create_target(df)
     
     return df
@@ -330,7 +348,8 @@ def prepare_features_for_training(data: pd.DataFrame) -> Tuple[pd.DataFrame, pd.
         'return_1d', 'return_5d',
         'volatility_20d',
         'ma_5d', 'ma_20d',
-        'ma_gap'
+        'ma_gap',
+        'z_score_20'
     ]
     
     # Select features and target

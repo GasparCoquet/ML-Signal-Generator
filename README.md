@@ -119,6 +119,7 @@ The pipeline computes the following features:
 - **Rolling Volatility**: 20-day rolling standard deviation of returns
 - **Moving Averages**: 5-day and 20-day moving averages
 - **MA Gap**: Ratio difference between short and long MAs
+- **Z-Score (20d)**: (Price − rolling mean) / rolling std; stationarity-aware, oscillates around 0 (better for ML than raw price/MA)
 
 ### Target Variable
 
@@ -127,6 +128,7 @@ Binary target: `y = 1` if next-day return > 0, else `y = 0`
 ### Model Training
 
 - Time series aware train/validation/test split (70%/15%/15%)
+- **Walk-Forward Validation**: `train_walk_forward()` in `src.model` for expanding-window cross-validation (TimeSeriesSplit)
 - Automatically trains and compares both Random Forest and XGBoost classifiers
 - Best model selection based on validation AUC (XGBoost used as tie-breaker)
 - Feature importance analysis for both models
@@ -167,7 +169,7 @@ After running the notebook, you'll see:
 
 *Note: Results will vary based on market conditions, data period, and model parameters.*
 
-## Limitations & Known Issues
+## Limitations & Performance Analysis
 
 **⚠️ Current Model Performance:**
 
@@ -216,6 +218,20 @@ Both **Random Forest** and **XGBoost** models may show signs of **overfitting** 
 - Add feature selection to reduce noise
 
 *This project is actively being improved. Contributions and suggestions are welcome!*
+
+## Market Regime & Performance Analysis
+
+### Signal-to-Noise Ratio
+The current model achieves an AUC of 0.52–0.55 on out-of-sample data. This is an expected result when using exclusively OHLC technical features on a highly efficient asset like SPY without alternative data.
+
+### Overfitting Detection
+The gap between Training Accuracy (>90%) and Validation Accuracy (~52%) highlights the tendency of tree-based models (Random Forest/XGBoost) to memorize noise in financial time series.
+
+### Next Steps for Alpha Generation
+To improve the Sharpe Ratio (currently ~0.12), the next iteration of this pipeline will include:
+1. **Regime Filtering:** Disabling signals during high-volatility regimes (VIX filtering).
+2. **Alternative Data:** Incorporating volume profile and option flow data.
+3. **Walk-Forward Optimization:** Replacing the static Train/Test split with an Expanding Window approach to adapt to changing market conditions.
 
 ## Code Style
 
