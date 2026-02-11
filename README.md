@@ -169,56 +169,6 @@ After running the notebook, you'll see:
 
 *Note: Results will vary based on market conditions, data period, and model parameters.*
 
-## Limitations & Performance Analysis
-
-**⚠️ Current Model Performance:**
-
-Both **Random Forest** and **XGBoost** models may show signs of **overfitting** depending on configuration:
-
-**Random Forest:**
-- **Training Accuracy**: Can be very high (90%+)
-- **Validation Accuracy**: Often 50-55% (near random)
-- **AUC**: Typically 0.50-0.55 (barely better than random)
-- **Characteristics**: Generally less prone to overfitting than XGBoost due to ensemble averaging, but can still memorize patterns with high tree depth
-
-**XGBoost:**
-- **Training Accuracy**: Can be extremely high (95%+)
-- **Validation Accuracy**: Often 50-51% (near random)
-- **AUC**: Typically 0.50-0.52 (barely better than random)
-- **Characteristics**: More prone to overfitting than Random Forest, especially with default hyperparameters (high learning rate, deep trees)
-
-**Model Comparison:**
-- The notebook trains and compares both models on validation metrics (AUC, accuracy) and backtest performance (returns, Sharpe ratio, drawdown)
-- Selection is based on validation AUC, but backtest performance may differ
-- Both models often show similar poor generalization despite good training performance
-- Model performance varies significantly with market conditions and data periods
-
-**What This Means:**
-- Both models are memorizing training data patterns rather than learning generalizable features
-- Despite potentially good backtest returns, the models may not perform well on future unseen data
-- The comparison between Random Forest and XGBoost helps identify which approach works better, but both may struggle with generalization
-- This is a common challenge in financial ML and indicates the need for:
-  - Better regularization (reducing model complexity)
-  - More diverse training data
-  - Feature engineering improvements
-  - Cross-validation strategies
-  - Hyperparameter tuning for both models
-
-**Why This Project is Still Valuable:**
-- Demonstrates a complete ML pipeline from data to backtesting
-- Shows real-world challenges in financial ML
-- Educational example of overfitting detection
-- Good code structure for further improvements
-
-**Potential Improvements:**
-- Implement early stopping and regularization
-- Add more sophisticated features (e.g., market regime indicators)
-- Use walk-forward validation instead of simple train/test split
-- Experiment with ensemble methods
-- Add feature selection to reduce noise
-
-*This project is actively being improved. Contributions and suggestions are welcome!*
-
 ## Market Regime & Performance Analysis
 
 ### Signal-to-Noise Ratio
