@@ -15,9 +15,10 @@ This project implements a complete ML pipeline to:
 
 ```
 ml-signal-generator/
+├── main.py              # CLI entry point — run the full pipeline
 ├── data/                # Sample data or placeholder
 ├── notebooks/
-│   └── 01_training.ipynb  # Complete training pipeline
+│   └── 01_training.ipynb  # Interactive training pipeline
 ├── src/
 │   ├── __init__.py
 │   ├── features.py      # Feature engineering functions
@@ -60,30 +61,35 @@ cp .env.example .env
 
 ## Usage
 
-### Running the Training Pipeline
+### Quick Start (command line)
 
-1. Open the Jupyter notebook:
+```bash
+python main.py                          # SPY, 2020-2024, default settings
+python main.py --ticker AAPL --start 2021-01-01 --end 2024-01-01
+python main.py --threshold 0.50 --transaction-cost 0.0005
+```
+
+This runs the full pipeline end-to-end — data download, feature engineering,
+model training (Random Forest + XGBoost), evaluation, signal generation,
+backtesting, and chart export — and prints results to stdout.
+
+### Jupyter Notebook (interactive)
+
+For step-by-step exploration:
+
 ```bash
 jupyter notebook notebooks/01_training.ipynb
 ```
 
-2. Execute all cells to:
-   - Download market data (default: SPY ETF from 2020-2024)
-   - Engineer features
-   - Train and compare both Random Forest and XGBoost models
-   - Select the best model based on validation AUC
-   - Generate trading signals
-   - Backtest both models and compare performance
-   - Generate performance plots and ROC curves
-
 ### Key Configuration
 
-In the notebook, you can modify:
-- `TICKER`: Stock ticker symbol (default: 'SPY')
-- `START_DATE` / `END_DATE`: Date range for data
-- `SIGNAL_THRESHOLD`: Probability threshold for signal generation (default: 0.55)
-- `transaction_cost`: Per-trade transaction cost used in backtesting
-  (expressed in return space, e.g. 2 bps = 0.0002, applied as
+Via CLI flags or in the notebook:
+- `--ticker` / `TICKER`: Stock ticker symbol (default: `SPY`)
+- `--start` / `START_DATE`: Start date YYYY-MM-DD (default: `2020-01-01`)
+- `--end` / `END_DATE`: End date YYYY-MM-DD (default: `2024-01-01`)
+- `--threshold` / `SIGNAL_THRESHOLD`: Probability threshold for signal generation (default: `0.55`)
+- `--transaction-cost` / `transaction_cost`: Per-trade transaction cost in return space
+  (e.g. 2 bps = 0.0002, applied as
   \\( \\text{Net\\_Return}_t = \\text{Gross\\_Return}_t - (\\text{Cost} \\times |\\text{Signal}_t - \\text{Signal}_{t-1}|) \\))
 
 *Note: Both Random Forest and XGBoost are automatically trained and compared. The best model is selected based on validation AUC, with XGBoost as the tie-breaker if AUCs are equal.*
