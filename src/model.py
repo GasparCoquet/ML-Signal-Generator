@@ -178,6 +178,52 @@ def train_walk_forward(
     return float(np.mean(scores))
 
 
+def bootstrap_auc_ci(
+    y_true: pd.Series | np.ndarray,
+    y_pred_proba: np.ndarray,
+    n_boot: int = 2000,
+    alpha: float = 0.05,
+    random_state: int = 42,
+) -> Tuple[float, float, float]:
+    """
+    Bootstrap confidence interval for test-set AUC.
+
+    A point estimate of AUC on ~150 daily observations carries a wide error bar.
+    Reporting AUC = 0.53 without an interval invites the reader to believe there is
+    edge when the interval comfortably contains 0.5 (i.e. a coin flip cannot be
+    ruled out). Resamples the test set with replacement and returns the percentile
+    interval.
+
+    Args:
+        y_true: True binary labels
+        y_pred_proba: Predicted probabilities for the positive class
+        n_boot: Number of bootstrap resamples
+        alpha: Significance level (0.05 -> 95% interval)
+        random_state: Random seed
+
+    Returns:
+        Tuple of (point estimate, lower bound, upper bound)
+    """
+    y_true_arr = np.asarray(y_true)
+    proba = np.asarray(y_pred_proba)
+    point = roc_auc_score(y_true_arr, proba)
+
+    rng = np.random.default_rng(random_state)
+    n = len(y_true_arr)
+    scores = []
+    for _ in range(n_boot):
+        idx = rng.integers(0, n, n)
+        # A resample can be single-class; AUC is undefined there, so skip it.
+        if len(np.unique(y_true_arr[idx])) < 2:
+            continue
+        scores.append(roc_auc_score(y_true_arr[idx], proba[idx]))
+
+    lower = float(np.percentile(scores, 100 * (alpha / 2)))
+    upper = float(np.percentile(scores, 100 * (1 - alpha / 2)))
+
+    return float(point), lower, upper
+
+
 def get_feature_importance(model: Any, feature_names: list[str]) -> pd.DataFrame:
     """
     Extract feature importance from trained model.

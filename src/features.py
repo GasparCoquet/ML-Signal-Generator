@@ -222,6 +222,40 @@ def compute_moving_averages(data: pd.DataFrame, windows: list[int] = [5, 20]) ->
     return df
 
 
+def compute_price_to_ma(data: pd.DataFrame, windows: list[int] = [5, 20]) -> pd.DataFrame:
+    """
+    Compute stationary price-to-moving-average features: Close / MA - 1.
+
+    Raw moving averages are absolute dollar prices and are therefore
+    non-stationary: they trend with the level of the index. Tree models cannot
+    extrapolate beyond the range of values seen in training, so an absolute-price
+    feature lets the model key on the price *level* — effectively a proxy for
+    calendar time — and any test row above the training high lands in the same
+    terminal leaf regardless of market state. Expressing the same information as
+    a ratio (percent distance from the moving average) keeps the signal and drops
+    the level.
+
+    Args:
+        data: DataFrame with 'Close' column
+        windows: MA windows to convert (e.g. [5, 20])
+
+    Returns:
+        DataFrame with additional price_to_ma_{w}d columns
+    """
+    df = data.copy()
+
+    for window in windows:
+        col = f'ma_{window}d'
+        if col not in df.columns:
+            df = compute_moving_averages(df, [window])
+        df[f'price_to_ma_{window}d'] = (df['Close'] / df[col]) - 1
+        df[f'price_to_ma_{window}d'] = df[f'price_to_ma_{window}d'].replace(
+            [np.inf, -np.inf], np.nan
+        )
+
+    return df
+
+
 def compute_z_score(data: pd.DataFrame, window: int = 20) -> pd.DataFrame:
     """
     Z-Score: (Price - rolling mean) / rolling std.
@@ -296,10 +330,14 @@ def engineer_features(
     This function orchestrates all feature engineering steps:
     1. Compute lagged returns
     2. Compute rolling volatility
-    3. Compute moving averages
+    3. Compute moving averages (kept for plotting/derived features, not fed to the model)
     4. Compute MA gap
-    5. Z-Score (stationarity-aware)
-    6. Create binary target
+    5. Price-to-MA ratios (stationary form of the moving averages)
+    6. Z-Score (stationarity-aware)
+    7. Create binary target
+
+    Every column handed to the model is stationary. The raw ma_{w}d columns are
+    computed as intermediates only — see prepare_features_for_training.
     
     Args:
         data: DataFrame with OHLC data
@@ -324,10 +362,13 @@ def engineer_features(
     # Step 4: Compute MA gap
     df = compute_ma_gap(df, short_window=ma_windows[0], long_window=ma_windows[1])
 
-    # Step 5: Z-Score (stationarity-aware: oscillates around 0, better for ML)
+    # Step 5: Price-to-MA ratios (stationary replacement for the raw MA levels)
+    df = compute_price_to_ma(df, windows=ma_windows)
+
+    # Step 6: Z-Score (stationarity-aware: oscillates around 0, better for ML)
     df = compute_z_score(df, window=volatility_window)
 
-    # Step 6: Create target
+    # Step 7: Create target
     df = create_target(df)
     
     return df
@@ -343,11 +384,18 @@ def prepare_features_for_training(data: pd.DataFrame) -> Tuple[pd.DataFrame, pd.
     Returns:
         Tuple of (features DataFrame, target Series)
     """
-    # Define feature columns
+    # Define feature columns.
+    #
+    # Deliberately EXCLUDES the raw ma_5d / ma_20d columns. Those are absolute
+    # dollar prices: non-stationary, unbounded, and outside the training range for
+    # a meaningful share of any forward test window. Tree models cannot extrapolate
+    # past the training range, so such a feature acts as a proxy for calendar time
+    # rather than for market state. price_to_ma_5d / price_to_ma_20d carry the same
+    # information in stationary form (percent distance from the moving average).
     feature_cols = [
         'return_1d', 'return_5d',
         'volatility_20d',
-        'ma_5d', 'ma_20d',
+        'price_to_ma_5d', 'price_to_ma_20d',
         'ma_gap',
         'z_score_20'
     ]
