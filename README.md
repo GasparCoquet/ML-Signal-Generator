@@ -1,219 +1,188 @@
 # ML Signal Generator
 
-A machine learning project for predicting next-day return direction of financial assets and generating binary trading signals with backtesting capabilities.
+Do daily OHLC technical features predict next-day SPY direction?
 
-## Overview
+**No — and this repo is built to show that honestly.**
 
-This project implements a complete ML pipeline to:
-- Download historical OHLC (Open, High, Low, Close) market data
-- Engineer technical features (returns, volatility, moving averages, etc.)
-- Train and compare both Random Forest and XGBoost models to predict next-day return direction
-- Generate probability-based trading signals
-- Backtest strategy performance with comprehensive metrics
+Out-of-sample AUC is indistinguishable from a coin flip, and a long-only signal that is
+long ~57% of days during a bull market **loses to simply buying and holding SPY**. That is
+the expected result for this feature set on a liquid index, and the harness is constructed
+so that it could not have concluded otherwise by accident.
 
-## Project Structure
+All numbers below are the console output of `python main.py` on the default configuration
+(SPY, 2020-01-01 → 2024-01-01, threshold 0.55, 2 bps cost). Reproduce them with one command.
+
+---
+
+## The headline result
+
+**Test window: 2023-05-31 → 2023-12-29 (148 rows, 147 backtest days).**
+
+| | Total Return | Sharpe | Max DD | Days Long |
+|---|---|---|---|---|
+| Random Forest (selected) | 7.32% | 1.56 | -4.97% | 57.1% |
+| XGBoost | 3.04% | 0.62 | -8.47% | 62.6% |
+| **Buy & Hold SPY** | **13.96%** | **2.20** | -9.97% | 100.0% |
+
+**Excess return vs buy & hold: Random Forest −6.64pp, XGBoost −10.91pp.**
+
+The strategy's Sharpe of 1.56 looks respectable in isolation. It is not. Over the same
+window, doing nothing but holding SPY returned 13.96% at Sharpe 2.20. The strategy is long
+most days of a melt-up, so it captures a fraction of the market's beta and reports it as
+performance. **A long-only signal in a rising market earns beta, not alpha.** Without the
+benchmark column, that distinction is invisible — which is exactly why the benchmark is
+computed with the same metric code and plotted on the same equity curve.
+
+## The model has no measurable edge
 
 ```
-ml-signal-generator/
-├── main.py              # CLI entry point — run the full pipeline
-├── data/                # Sample data or placeholder
-├── notebooks/
-│   └── 01_training.ipynb  # Interactive training pipeline
-├── src/
-│   ├── __init__.py
-│   ├── features.py      # Feature engineering functions
-│   ├── model.py         # ML model training functions
-│   └── backtest.py      # Backtesting logic
-├── outputs/             # Generated charts and results
-├── .env.example         # Environment variables template
-├── requirements.txt     # Python dependencies
-└── README.md           # This file
+Bootstrap 95% CI on test AUC (2000 resamples):
+  Random Forest   AUC 0.5255   95% CI [0.4269, 0.6235]   contains 0.5 - cannot reject coin flip
+  XGBoost         AUC 0.5462   95% CI [0.4516, 0.6451]   contains 0.5 - cannot reject coin flip
 ```
 
-## Installation
+Point AUCs of 0.5255 and 0.5462 sit above 0.5, and it would be easy to stop reading there
+and call it edge. On 148 daily observations the error bar is roughly ±0.10 — **both
+intervals comfortably contain 0.5**, so a coin flip cannot be ruled out. Reporting the point
+estimate without the interval would be the single easiest way to fool yourself here.
 
-### Prerequisites
+The walk-forward estimate, which averages 5 expanding-window folds over 838 days and is far
+more robust than one 148-day window, agrees:
 
-- Python 3.10 or higher
-
-### Setup
-
-1. Clone the repository:
-```bash
-git clone git@github.com:GasparCoquet/ml-signal-generator.git
-cd ml-signal-generator
+```
+WALK-FORWARD VALIDATION (expanding window, 5 folds)
+  Random Forest  - mean AUC: 0.4997
+  XGBoost        - mean AUC: 0.4903
 ```
 
-2. Install dependencies:
+Both are at or below 0.5. **The honest read is: no edge detected.**
+
+## Overfitting: caught, not hidden
+
+```
+OVERFITTING DIAGNOSTIC (single 70/15 train/val cut)
+  Random Forest  - train acc: 0.9855   val acc: 0.4730   val AUC: 0.4382
+  XGBoost        - train acc: 0.9913   val acc: 0.4797   val AUC: 0.4637
+```
+
+The models classify the training set almost perfectly (98.6% / 99.1%) and then perform at
+or below chance out of sample (47.3% / 48.0%). Tree ensembles will memorise noise in
+financial time series, and this is what it looks like. The point of printing both columns is
+that the walk-forward split *catches* this rather than letting it leak into a headline
+number. A single in-sample fit here would have produced a spectacular and completely fake
+result.
+
+## Non-stationary features (fixed)
+
+The model originally received `ma_5d` and `ma_20d` as **absolute dollar prices**. This is a
+subtle and serious bug for tree models:
+
+- Trees cannot extrapolate beyond the range of values seen in training.
+- Training range was `ma_20d ∈ [229.52, 442.07]`; **11 of 148 test rows (7.4%)** fell
+  outside it. Every one of those lands in the same terminal leaf regardless of market state.
+- `ma_20d` was XGBoost's single most important feature (importance 0.159854) — so the
+  top-ranked signal was effectively a **proxy for calendar time**, not for market state.
+
+Fixed by feeding the same information in stationary form, `price / ma − 1` (percent distance
+from the moving average). Effect on AUC, reported in both directions:
+
+| | Walk-forward AUC (5 folds, 838 days) | Test AUC (148 days) |
+|---|---|---|
+| RF — raw price MAs | 0.5083 | 0.4945 |
+| RF — stationary MAs | **0.4997** | **0.5255** |
+| XGB — raw price MAs | 0.5027 | 0.4676 |
+| XGB — stationary MAs | **0.4903** | **0.5462** |
+
+The fix moved the single-window test AUC **up** and the robust walk-forward AUC **down**.
+Neither move is evidence of anything: an AUC that swings by 0.08 on a change of feature
+*representation alone* is telling you the metric is dominated by noise at this sample size.
+The correct conclusion is not "the fix helped" — it is that **there is no stable signal here
+to help**. The features are now stationary because that is correct practice, not because it
+bought performance. It did not.
+
+## Why you can trust the negative result
+
+A negative result is only worth anything if the harness could have found a positive one. This
+one could have:
+
+- **No lookahead.** The target is `Close.shift(-1) / Close - 1`; features at time *t* use
+  only data up to *t*. Signals are applied to the *next* day's return.
+- **No leakage across the split.** Test data is the last 15%, held out entirely. Model
+  selection happens via walk-forward on the first 85% and never touches the test set.
+- **Costs charged on turnover, not on days held.** `Net_t = Gross_t − cost × |Signal_t − Signal_{t−1}|`.
+  Charging per *day held* would have quietly penalised the strategy and made the benchmark
+  comparison flattering by accident.
+- **Benchmarked.** Buy & hold is computed on the identical return series with the identical
+  Sharpe/annualisation code, so the columns are comparable.
+- **Error bars on the headline metric.** Bootstrap CI on test AUC.
+
+## Reproduce
+
 ```bash
 pip install -r requirements.txt
-```
-
-3. Set up environment variables (optional, for alternative APIs):
-```bash
-# Copy the example file
-cp .env.example .env
-
-# Edit .env and add your API keys if using Alpha Vantage
-# Get free API keys:
-# - Alpha Vantage: https://www.alphavantage.co/support/#api-key
-```
-
-## Usage
-
-### Quick Start (command line)
-
-```bash
-python main.py                          # SPY, 2020-2024, default settings
+python main.py                          # SPY, 2020-2024, defaults — produces every number above
 python main.py --ticker AAPL --start 2021-01-01 --end 2024-01-01
 python main.py --threshold 0.50 --transaction-cost 0.0005
 ```
 
-This runs the full pipeline end-to-end — data download, feature engineering,
-model training (Random Forest + XGBoost), evaluation, signal generation,
-backtesting, and chart export — and prints results to stdout.
+Data is cached to `data/` on first download, so reruns are deterministic and offline.
+Outputs (`outputs/`): `equity_curve.png` (strategy vs buy & hold), `roc_curve.png`,
+`feature_importance_{rf,xgb}.png`.
 
-### Jupyter Notebook (interactive)
+## What the pipeline does
 
-For step-by-step exploration:
+- **Data**: daily OHLC via yfinance (Alpha Vantage supported as a fallback; set `API_SOURCE`
+  in `.env`). Cached locally after first fetch.
+- **Features** (all stationary): `return_1d`, `return_5d`, `volatility_20d`,
+  `price_to_ma_5d`, `price_to_ma_20d`, `ma_gap`, `z_score_20`.
+- **Target**: `y = 1` if next-day return > 0, else `0`. (986 rows after NaN drop; 529 up days
+  / 457 down days.)
+- **Split**: last 15% held out as test. Walk-forward (expanding window, `TimeSeriesSplit`,
+  5 folds) over the first 85% selects between Random Forest and XGBoost by mean fold AUC.
+- **Signals**: long if `P(up) > threshold` (default 0.55), else flat. Long-only, so the
+  strategy can never be short — a structural limitation, and the reason the buy & hold
+  comparison matters so much.
+- **Backtest**: total/annualised return, volatility, Sharpe (rf = 0), max drawdown, win rate,
+  turnover-based transaction costs, and the buy & hold benchmark.
 
-```bash
-jupyter notebook notebooks/01_training.ipynb
+## Honest next steps
+
+The result above says the feature set is exhausted, not that the pipeline is. What would
+actually move the needle:
+
+1. **Allow short positions.** Long-only cannot express a bearish view, and structurally
+   guarantees beta contamination in any bull sample.
+2. **Test on a bear or sideways regime** (e.g. 2022). A single 147-day bull window is not
+   enough to conclude anything about the strategy; it is only enough to conclude the strategy
+   did not beat holding.
+3. **Features with a plausible economic reason to predict** — order-flow imbalance, options
+   positioning, realised-vs-implied vol spread. Lagged returns and moving averages on a
+   liquid index are the most heavily arbitraged signals in existence; finding no edge in them
+   is the *prior*, not a surprise.
+4. **Longer horizons.** Next-day direction on SPY is close to the hardest possible target.
+
+Anything that reports a positive result here should be treated as a bug until proven otherwise.
+
+## Project structure
+
 ```
-
-### Key Configuration
-
-Via CLI flags or in the notebook:
-- `--ticker` / `TICKER`: Stock ticker symbol (default: `SPY`)
-- `--start` / `START_DATE`: Start date YYYY-MM-DD (default: `2020-01-01`)
-- `--end` / `END_DATE`: End date YYYY-MM-DD (default: `2024-01-01`)
-- `--threshold` / `SIGNAL_THRESHOLD`: Probability threshold for signal generation (default: `0.55`)
-- `--transaction-cost` / `transaction_cost`: Per-trade transaction cost in return space
-  (e.g. 2 bps = 0.0002, applied as
-  \\( \\text{Net\\_Return}_t = \\text{Gross\\_Return}_t - (\\text{Cost} \\times |\\text{Signal}_t - \\text{Signal}_{t-1}|) \\))
-
-*Note: Both Random Forest and XGBoost are automatically trained and compared. The best model is selected based on validation AUC, with XGBoost as the tie-breaker if AUCs are equal.*
-
-### API Configuration
-
-The project supports multiple data sources to avoid rate limiting:
-
-1. **yfinance** (default): Free, no API key needed, but can be rate limited
-2. **Alpha Vantage**: Free tier (5 calls/min, 500 calls/day) - requires API key
-
-Configure via `.env` file:
-- Copy `.env.example` to `.env`
-- Set `API_SOURCE` to your preferred source
-- Add API key if using Alpha Vantage
-
-### Troubleshooting
-
-**Rate Limiting (Too Many Requests):**
-- Yahoo Finance (via yfinance) has rate limits to prevent abuse
-- **Solution 1**: Use an alternative API (Alpha Vantage) - see API Configuration above
-- **Solution 2**: If using yfinance, wait 15-20 minutes before trying again
-- **Solution 3**: Set `USE_SAMPLE_DATA = True` in the notebook to use synthetic data for testing
-- The download function includes automatic retry logic (3 attempts with increasing delays)
-- Once data is downloaded, it's saved locally and reused automatically
-
-## Features
-
-### Feature Engineering
-
-The pipeline computes the following features:
-- **Lagged Returns**: 1-day and 5-day returns
-- **Rolling Volatility**: 20-day rolling standard deviation of returns
-- **Moving Averages**: 5-day and 20-day moving averages
-- **MA Gap**: Ratio difference between short and long MAs
-- **Z-Score (20d)**: (Price − rolling mean) / rolling std; stationarity-aware, oscillates around 0 (better for ML than raw price/MA)
-
-### Target Variable
-
-Binary target: `y = 1` if next-day return > 0, else `y = 0`
-
-### Model Training
-
-- Time series aware train/validation/test split (70%/15%/15%)
-- **Walk-Forward Validation**: `train_walk_forward()` in `src.model` for expanding-window cross-validation (TimeSeriesSplit)
-- Automatically trains and compares both Random Forest and XGBoost classifiers
-- Best model selection based on validation AUC (XGBoost used as tie-breaker)
-- Feature importance analysis for both models
-- AUC and accuracy metrics with side-by-side comparison
-- ROC curve visualization comparing both models
-
-### Signal Generation
-
-- Probability-based signals using model predictions
-- Configurable threshold (default: 0.55)
-- Binary signals: 1 (long) or 0 (flat)
-
-### Backtesting
-
-The backtest computes:
-- **Total Return**: Overall strategy return
-- **Annualized Return**: Return adjusted for time period
-- **Volatility**: Annualized standard deviation
-- **Sharpe Ratio**: Risk-adjusted return metric
-- **Maximum Drawdown**: Largest peak-to-trough decline
-- **Win Rate**: Percentage of profitable trades
-- **Transaction Costs Impact**: Strategy returns are net of realistic
-  transaction costs based on position changes (turnover)
-
-## Outputs
-
-The pipeline generates two key visualizations saved to `outputs/`:
-- `equity_curve.png`: Strategy equity curve over time
-- `feature_importance.png`: Feature importance ranking
-
-## Key Results
-
-After running the notebook, you'll see:
-- Model performance metrics (AUC, accuracy)
-- Feature importance rankings
-- Backtest performance metrics
-- Equity curve visualization
-
-*Note: Results will vary based on market conditions, data period, and model parameters.*
-
-## Market Regime & Performance Analysis
-
-### Signal-to-Noise Ratio
-The current model achieves an AUC of 0.52–0.55 on out-of-sample data. This is an expected result when using exclusively OHLC technical features on a highly efficient asset like SPY without alternative data.
-
-### Overfitting Detection
-The gap between Training Accuracy (>90%) and Validation Accuracy (~52%) highlights the tendency of tree-based models (Random Forest/XGBoost) to memorize noise in financial time series.
-
-### Next Steps for Alpha Generation
-To improve the Sharpe Ratio (currently ~0.12), the next iteration of this pipeline will include:
-1. **Regime Filtering:** Disabling signals during high-volatility regimes (VIX filtering).
-2. **Alternative Data:** Incorporating volume profile and option flow data.
-3. **Walk-Forward Optimization:** Replacing the static Train/Test split with an Expanding Window approach to adapt to changing market conditions.
-
-## Code Style
-
-- Modern, modular Python with clear separation of concerns
-- Type hints and comprehensive docstrings
-- PEP8 compliant code
-- Vectorized operations for performance
-- Clear variable naming
-
-## Dependencies
-
-- `pandas`: Data manipulation
-- `numpy`: Numerical computations
-- `scikit-learn`: Machine learning models
-- `xgboost`: Gradient boosting classifier
-- `matplotlib`: Plotting
-- `yfinance`: Market data download (default)
-- `requests`: HTTP library for alternative APIs
-- `python-dotenv`: Environment variable management
-- `jupyter`: Notebook environment
+ml-signal-generator/
+├── main.py              # CLI entry point — runs the full pipeline
+├── data/                # Cached OHLC downloads
+├── notebooks/
+│   └── 01_training.ipynb
+├── src/
+│   ├── features.py      # Feature engineering (stationary)
+│   ├── model.py         # Training, walk-forward validation, bootstrap AUC CI
+│   └── backtest.py      # Signals, backtest, buy & hold benchmark
+├── outputs/             # Generated charts
+└── requirements.txt
+```
 
 ## Disclaimer
 
-**⚠️ IMPORTANT: For educational purposes only, not financial advice.**
-
-This project is intended for educational and research purposes only. The trading signals and backtest results are not recommendations for actual trading. Past performance does not guarantee future results. Always conduct thorough research and consult with qualified financial advisors before making investment decisions.
+**For educational purposes only, not financial advice.** These are not trading
+recommendations. Past performance does not guarantee future results.
 
 ## License
 

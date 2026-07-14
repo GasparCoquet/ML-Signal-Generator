@@ -211,24 +211,62 @@ def backtest_strategy(
     return equity, metrics
 
 
+def backtest_buy_and_hold(
+    returns: pd.Series | np.ndarray,
+    initial_capital: float = 10000.0,
+) -> Tuple[pd.Series | np.ndarray, Dict[str, float]]:
+    """
+    Buy-and-hold benchmark over the same return series as the strategy.
+
+    This is the benchmark the strategy has to beat to be worth anything. A
+    long-only signal that is long a large fraction of days during a rising market
+    will show a positive Sharpe from beta alone; without this comparison there is
+    no way to tell skill from exposure. Uses the identical metric code as
+    backtest_strategy (same Sharpe convention, same annualisation), so the two
+    columns are directly comparable.
+
+    Args:
+        returns: Actual next-day returns over the test window
+        initial_capital: Starting capital
+
+    Returns:
+        Tuple of (equity curve, performance metrics)
+    """
+    returns_array = returns.values if isinstance(returns, pd.Series) else np.asarray(returns)
+
+    # Always long: signal = 1 every day, no turnover after entry, so no ongoing cost.
+    equity = compute_equity_curve(returns, initial_capital)
+    metrics = compute_performance_metrics(returns_array, equity)
+    metrics['total_trades'] = 1
+
+    return equity, metrics
+
+
 def plot_equity_curve(
     equity: pd.Series,
     save_path: str = 'outputs/equity_curve.png',
-    title: str = 'Equity Curve'
+    title: str = 'Equity Curve',
+    benchmark: pd.Series | None = None,
+    benchmark_label: str = 'Buy & Hold',
 ) -> None:
     """
-    Plot equity curve.
-    
+    Plot equity curve, optionally against a benchmark on the same axes.
+
     Args:
         equity: Equity curve series
         save_path: Path to save the figure
         title: Plot title
+        benchmark: Optional benchmark equity curve (e.g. buy-and-hold)
+        benchmark_label: Legend label for the benchmark
     """
     # Create output directory if it doesn't exist
     os.makedirs(os.path.dirname(save_path), exist_ok=True)
-    
+
     plt.figure(figsize=(12, 6))
     plt.plot(equity.index, equity.values, linewidth=2, label='Strategy Equity')
+    if benchmark is not None:
+        plt.plot(benchmark.index, benchmark.values, linewidth=2,
+                 linestyle='-', color='#888888', label=benchmark_label)
     plt.axhline(y=equity.iloc[0], color='r', linestyle='--', alpha=0.5, label='Initial Capital')
     plt.xlabel('Date', fontsize=12)
     plt.ylabel('Equity ($)', fontsize=12)
@@ -238,7 +276,7 @@ def plot_equity_curve(
     plt.tight_layout()
     plt.savefig(save_path, dpi=300, bbox_inches='tight')
     plt.close()
-    
+
     print(f"Equity curve saved to {save_path}")
 
 

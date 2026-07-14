@@ -28,11 +28,15 @@ from sklearn.base import clone
 import xgboost as xgb
 
 from src.model import (
+    bootstrap_auc_ci,
     evaluate_model,
     get_feature_importance,
+    train_random_forest,
     train_walk_forward,
+    train_xgboost,
 )
 from src.backtest import (
+    backtest_buy_and_hold,
     backtest_strategy,
     generate_signals,
     plot_equity_curve,
@@ -140,7 +144,31 @@ def run(ticker, start_date, end_date, signal_threshold, transaction_cost):
     X_train_full, y_train_full = X.iloc[:test_start], y.iloc[:test_start]
     X_test, y_test = X.iloc[test_start:], y.iloc[test_start:]
 
-    print(f"Train+Val (walk-forward): {len(X_train_full)}  |  Test (held-out): {len(X_test)}\n")
+    print(f"Train+Val (walk-forward): {len(X_train_full)}  |  Test (held-out): {len(X_test)}")
+    print(f"Test window: {X_test.index[0].date()}  to  {X_test.index[-1].date()}\n")
+
+    # ── 3b. Overfitting diagnostic ───────────────────────────────────────────
+    #   Single 70/15 train/validation cut, purely to expose the train-vs-validation
+    #   gap. Tree models memorise noise in financial time series; printing both
+    #   numbers side by side is how you catch it rather than discover it in production.
+    print("=" * 70)
+    print("OVERFITTING DIAGNOSTIC (single 70/15 train/val cut)")
+    print("=" * 70)
+
+    tr_end, val_end = int(n * 0.70), int(n * 0.85)
+    X_a, y_a = X.iloc[:tr_end], y.iloc[:tr_end]
+    X_v, y_v = X.iloc[tr_end:val_end], y.iloc[tr_end:val_end]
+
+    _, diag_rf = train_random_forest(X_a, y_a, X_v, y_v)
+    _, diag_xgb = train_xgboost(X_a, y_a, X_v, y_v)
+
+    print(f"\n  Random Forest  —  train acc: {diag_rf['train_accuracy']:.4f}   "
+          f"val acc: {diag_rf['val_accuracy']:.4f}   val AUC: {diag_rf['auc']:.4f}")
+    print(f"  XGBoost        —  train acc: {diag_xgb['train_accuracy']:.4f}   "
+          f"val acc: {diag_xgb['val_accuracy']:.4f}   val AUC: {diag_xgb['auc']:.4f}")
+    print("\n  A large train/val accuracy gap means the model is memorising noise,")
+    print("  not learning signal. Walk-forward validation below is what keeps this")
+    print("  from leaking into the reported result.\n")
 
     # ── 4. Walk-forward model selection (expanding window, 5 folds) ─────────
     print("=" * 70)
@@ -211,6 +239,14 @@ def run(ticker, start_date, end_date, signal_threshold, transaction_cost):
     print(f"XGBoost        —  AUC: {test_results_xgb['auc']:.4f}   Accuracy: {test_results_xgb['accuracy']:.4f}")
     print(classification_report(y_test, test_results_xgb["y_pred"]))
 
+    # A point AUC on ~150 daily rows is a noisy statistic. Show the error bar and
+    # state plainly whether a coin flip can be ruled out.
+    print("Bootstrap 95% CI on test AUC (2000 resamples):")
+    for name, res in (("Random Forest", test_results_rf), ("XGBoost", test_results_xgb)):
+        pt, lo, hi = bootstrap_auc_ci(y_test, res["y_pred_proba"])
+        verdict = "contains 0.5 — cannot reject coin flip" if lo <= 0.5 <= hi else "excludes 0.5"
+        print(f"  {name:<15} AUC {pt:.4f}   95% CI [{lo:.4f}, {hi:.4f}]   {verdict}")
+
     # ROC curve
     _plot_roc(y_test, test_results_rf["y_pred_proba"], test_results_xgb["y_pred_proba"],
               test_results_rf["auc"], test_results_xgb["auc"],
@@ -262,21 +298,62 @@ def run(ticker, start_date, end_date, signal_threshold, transaction_cost):
     equity_rf, metrics_rf_bt = _backtest_one("Random Forest", signals_rf, test_returns)
     equity_xgb, metrics_xgb_bt = _backtest_one("XGBoost", signals_xgb, test_returns)
 
+    # Buy-and-hold benchmark over the EXACT same window, same metric code.
+    equity_bh, metrics_bh = backtest_buy_and_hold(test_returns, initial_capital=10_000.0)
+    print(f"\n  Buy & Hold ({ticker}):")
+    print(f"    Total Return:      {metrics_bh['total_return_pct']:>8.2f}%")
+    print(f"    Annualized Return: {metrics_bh['annualized_return_pct']:>8.2f}%")
+    print(f"    Volatility:        {metrics_bh['volatility_pct']:>8.2f}%")
+    print(f"    Sharpe Ratio:      {metrics_bh['sharpe_ratio']:>8.2f}")
+    print(f"    Max Drawdown:      {metrics_bh['max_drawdown_pct']:>8.2f}%")
+
     # Best model selected by walk-forward AUC
     if wf_auc_rf >= wf_auc_xgb:
-        best_name, best_equity = "Random Forest", equity_rf
+        best_name, best_equity, best_metrics = "Random Forest", equity_rf, metrics_rf_bt
     else:
-        best_name, best_equity = "XGBoost", equity_xgb
+        best_name, best_equity, best_metrics = "XGBoost", equity_xgb, metrics_xgb_bt
 
     print(f"\n  Best model (by walk-forward AUC): {best_name}")
 
+    # ── 9b. Strategy vs benchmark ────────────────────────────────────────────
+    print("\n" + "=" * 70)
+    print(f"STRATEGY vs BUY & HOLD  ({X_test.index[0].date()} to {X_test.index[-1].date()})")
+    print("=" * 70)
+    print(f"\n  {'':<22}{'Total Ret':>12}{'Sharpe':>10}{'MaxDD':>10}{'Days Long':>12}")
+    for name, m, sig in (
+        ("Random Forest", metrics_rf_bt, signals_rf),
+        ("XGBoost", metrics_xgb_bt, signals_xgb),
+    ):
+        print(f"  {name:<22}{m['total_return_pct']:>11.2f}%{m['sharpe_ratio']:>10.2f}"
+              f"{m['max_drawdown_pct']:>9.2f}%{sig.mean()*100:>11.1f}%")
+    print(f"  {'Buy & Hold ' + ticker:<22}{metrics_bh['total_return_pct']:>11.2f}%"
+          f"{metrics_bh['sharpe_ratio']:>10.2f}{metrics_bh['max_drawdown_pct']:>9.2f}%"
+          f"{100.0:>11.1f}%")
+
+    excess_rf = metrics_rf_bt["total_return_pct"] - metrics_bh["total_return_pct"]
+    excess_xgb = metrics_xgb_bt["total_return_pct"] - metrics_bh["total_return_pct"]
+    print(f"\n  Excess return vs Buy & Hold  —  Random Forest: {excess_rf:+.2f}%")
+    print(f"  Excess return vs Buy & Hold  —  XGBoost:       {excess_xgb:+.2f}%")
+
+    best_excess = best_metrics["total_return_pct"] - metrics_bh["total_return_pct"]
+    if best_excess <= 0:
+        print(f"\n  The selected model ({best_name}) UNDERPERFORMS buy-and-hold by "
+              f"{abs(best_excess):.2f}pp over this window.")
+        print("  A long-only signal in a rising market earns beta, not alpha.")
+    else:
+        print(f"\n  The selected model ({best_name}) beats buy-and-hold by {best_excess:.2f}pp "
+              f"over this window.")
+
     # ── 10. Plot results ─────────────────────────────────────────────────────
     plot_equity_curve(equity_rf, str(output_dir / "equity_curve_rf.png"),
-                      "Random Forest Strategy Equity Curve")
+                      "Random Forest Strategy vs Buy & Hold", benchmark=equity_bh,
+                      benchmark_label=f"Buy & Hold {ticker}")
     plot_equity_curve(equity_xgb, str(output_dir / "equity_curve_xgb.png"),
-                      "XGBoost Strategy Equity Curve")
+                      "XGBoost Strategy vs Buy & Hold", benchmark=equity_bh,
+                      benchmark_label=f"Buy & Hold {ticker}")
     plot_equity_curve(best_equity, str(output_dir / "equity_curve.png"),
-                      f"{best_name} Strategy Equity Curve (Best)")
+                      f"{best_name} Strategy vs Buy & Hold (Best Model)", benchmark=equity_bh,
+                      benchmark_label=f"Buy & Hold {ticker}")
 
     print(f"\nAll outputs saved to {output_dir}/")
 
