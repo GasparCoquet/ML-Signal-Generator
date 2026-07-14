@@ -2,7 +2,7 @@
 
 Do daily OHLC technical features predict next-day SPY direction?
 
-**No — and this repo is built to show that honestly.**
+**No - and this repo is built to show that honestly.**
 
 Out-of-sample AUC is indistinguishable from a coin flip, and a long-only signal that is
 long ~57% of days during a bull market **loses to simply buying and holding SPY**. That is
@@ -30,7 +30,7 @@ The strategy's Sharpe of 1.56 looks respectable in isolation. It is not. Over th
 window, doing nothing but holding SPY returned 13.96% at Sharpe 2.20. The strategy is long
 most days of a melt-up, so it captures a fraction of the market's beta and reports it as
 performance. **A long-only signal in a rising market earns beta, not alpha.** Without the
-benchmark column, that distinction is invisible — which is exactly why the benchmark is
+benchmark column, that distinction is invisible - which is exactly why the benchmark is
 computed with the same metric code and plotted on the same equity curve.
 
 ## The model has no measurable edge
@@ -42,7 +42,7 @@ Bootstrap 95% CI on test AUC (2000 resamples):
 ```
 
 Point AUCs of 0.5255 and 0.5462 sit above 0.5, and it would be easy to stop reading there
-and call it edge. On 148 daily observations the error bar is roughly ±0.10 — **both
+and call it edge. On 148 daily observations the error bar is roughly ±0.10 - **both
 intervals comfortably contain 0.5**, so a coin flip cannot be ruled out. Reporting the point
 estimate without the interval would be the single easiest way to fool yourself here.
 
@@ -80,7 +80,7 @@ subtle and serious bug for tree models:
 - Trees cannot extrapolate beyond the range of values seen in training.
 - Training range was `ma_20d ∈ [229.52, 442.07]`; **11 of 148 test rows (7.4%)** fell
   outside it. Every one of those lands in the same terminal leaf regardless of market state.
-- `ma_20d` was XGBoost's single most important feature (importance 0.159854) — so the
+- `ma_20d` was XGBoost's single most important feature (importance 0.159854) - so the
   top-ranked signal was effectively a **proxy for calendar time**, not for market state.
 
 Fixed by feeding the same information in stationary form, `price / ma − 1` (percent distance
@@ -88,15 +88,15 @@ from the moving average). Effect on AUC, reported in both directions:
 
 | | Walk-forward AUC (5 folds, 838 days) | Test AUC (148 days) |
 |---|---|---|
-| RF — raw price MAs | 0.5083 | 0.4945 |
-| RF — stationary MAs | **0.4997** | **0.5255** |
-| XGB — raw price MAs | 0.5027 | 0.4676 |
-| XGB — stationary MAs | **0.4903** | **0.5462** |
+| RF - raw price MAs | 0.5083 | 0.4945 |
+| RF - stationary MAs | **0.4997** | **0.5255** |
+| XGB - raw price MAs | 0.5027 | 0.4676 |
+| XGB - stationary MAs | **0.4903** | **0.5462** |
 
 The fix moved the single-window test AUC **up** and the robust walk-forward AUC **down**.
 Neither move is evidence of anything: an AUC that swings by 0.08 on a change of feature
 *representation alone* is telling you the metric is dominated by noise at this sample size.
-The correct conclusion is not "the fix helped" — it is that **there is no stable signal here
+The correct conclusion is not "the fix helped" - it is that **there is no stable signal here
 to help**. The features are now stationary because that is correct practice, not because it
 bought performance. It did not.
 
@@ -120,7 +120,7 @@ one could have:
 
 ```bash
 pip install -r requirements.txt
-python main.py                          # SPY, 2020-2024, defaults — produces every number above
+python main.py                          # SPY, 2020-2024, defaults - produces every number above
 python main.py --ticker AAPL --start 2021-01-01 --end 2024-01-01
 python main.py --threshold 0.50 --transaction-cost 0.0005
 ```
@@ -140,7 +140,7 @@ Outputs (`outputs/`): `equity_curve.png` (strategy vs buy & hold), `roc_curve.pn
 - **Split**: last 15% held out as test. Walk-forward (expanding window, `TimeSeriesSplit`,
   5 folds) over the first 85% selects between Random Forest and XGBoost by mean fold AUC.
 - **Signals**: long if `P(up) > threshold` (default 0.55), else flat. Long-only, so the
-  strategy can never be short — a structural limitation, and the reason the buy & hold
+  strategy can never be short - a structural limitation, and the reason the buy & hold
   comparison matters so much.
 - **Backtest**: total/annualised return, volatility, Sharpe (rf = 0), max drawdown, win rate,
   turnover-based transaction costs, and the buy & hold benchmark.
@@ -155,7 +155,7 @@ actually move the needle:
 2. **Test on a bear or sideways regime** (e.g. 2022). A single 147-day bull window is not
    enough to conclude anything about the strategy; it is only enough to conclude the strategy
    did not beat holding.
-3. **Features with a plausible economic reason to predict** — order-flow imbalance, options
+3. **Features with a plausible economic reason to predict** - order-flow imbalance, options
    positioning, realised-vs-implied vol spread. Lagged returns and moving averages on a
    liquid index are the most heavily arbitraged signals in existence; finding no edge in them
    is the *prior*, not a surprise.
@@ -167,7 +167,7 @@ Anything that reports a positive result here should be treated as a bug until pr
 
 ```
 ml-signal-generator/
-├── main.py              # CLI entry point — runs the full pipeline
+├── main.py              # CLI entry point - runs the full pipeline
 ├── data/                # Cached OHLC downloads
 ├── notebooks/
 │   └── 01_training.ipynb
