@@ -166,6 +166,14 @@ def main() -> None:
             "n_rows": int(len(panel)),
             "mean_names_per_month": float(names_per_month.mean()),
             "min_names_per_month": int(names_per_month.min()),
+            "max_names_per_month": int(names_per_month.max()),
+        },
+        # First bar per ticker that starts trading after the sample start, so
+        # README examples of mid-sample entrants are traceable to an artifact.
+        "mid_sample_entrants": {
+            t: str(adj[t].first_valid_index().date())
+            for t in adj.columns
+            if adj[t].first_valid_index() > adj.index[0]
         },
         "evaluation_window": {
             "first_month": str(eval_months[0].date()),
@@ -179,6 +187,7 @@ def main() -> None:
             for name, res in results.items()
         },
         "benchmark": bench,
+        "elapsed_seconds": round(time.time() - t0, 1),
     }
     RESULTS_JSON.parent.mkdir(exist_ok=True)
     with open(RESULTS_JSON, "w", encoding="utf-8") as f:

@@ -101,12 +101,13 @@ def test_forward_return_hand_computed_and_last_month_nan():
 
 
 def test_eligibility_needs_min_history():
-    adj, close, volume = _constant_growth_frames(n_days=700, n_names=3)
+    adj, close, volume = _constant_growth_frames(n_days=800, n_names=3)
     # T2 starts trading late: NaN for the first 400 days.
     adj.iloc[:400, 2] = np.nan
     close.iloc[:400, 2] = np.nan
     volume.iloc[:400, 2] = np.nan
     panel = build_panel(adj, close, volume, min_names=1)
+    sufficiency_checked = 0
     for t in panel.index.get_level_values("date").unique():
         names = panel.loc[t].index
         n_hist = adj.loc[:t, "T2"].notna().sum()
@@ -115,6 +116,10 @@ def test_eligibility_needs_min_history():
         elif n_hist >= MIN_HISTORY_DAYS + 63:
             # Well past warm-up for every rolling window: must be present.
             assert "T2" in names
+        if n_hist >= MIN_HISTORY_DAYS + 63:
+            sufficiency_checked += 1
+    # Guard against this branch going dead: the sufficiency case must occur.
+    assert sufficiency_checked > 0
 
 
 def test_rank_is_per_date_no_pooling():

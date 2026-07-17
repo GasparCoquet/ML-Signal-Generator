@@ -188,4 +188,12 @@ def build_panel(
     if not frames:
         raise ValueError("No month has enough eligible names to build a panel.")
     panel = pd.concat(frames)
+    # A mid-sample month dropped by the min_names filter would leave a gap:
+    # fwd_ret would still span one grid step but the holding period between
+    # consecutive panel months would be two, silently misstating turnover.
+    kept = panel.index.get_level_values("date").unique().sort_values()
+    positions = [grid.get_loc(t) for t in kept]
+    if positions != list(range(positions[0], positions[0] + len(positions))):
+        raise ValueError("Panel months are not contiguous on the rebalance grid; "
+                         "a mid-sample month fell below min_names.")
     return rank_panel(panel)

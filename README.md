@@ -1,6 +1,6 @@
 # ML Signal Generator
 
-Two studies, one repo, one rulebook: baselines before ML, walk-forward with no
+Two studies under the same rules: baselines before ML, walk-forward with no
 leakage, error bars or t-stats on every headline number, costs charged on
 turnover, and negative results reported as findings.
 
@@ -230,7 +230,8 @@ committed universe file is frozen; `python -m src.cross_sectional.universe
 first download, so reruns are offline and deterministic given the cache. The
 default invocation reproduces every phase 2 number above; it wrote
 `outputs/cross_sectional_results.json` and `outputs/xsec_decile_returns.png`
-in 115.5s on a laptop from the local cache.
+in 122.7s on a laptop from the local cache (recorded as `elapsed_seconds`
+in the results JSON).
 
 ## Project structure
 
