@@ -40,3 +40,11 @@ Thumbs.db
 .env
 .env.local
 
+
+# Phase 2 price cache metadata
+data/xsec_meta.json
+data/failed_tickers.txt
+
+# Phase 2 committed artifacts (exceptions must come after the ignore rules above)
+!data/universe_sp500.csv
+!outputs/xsec_decile_returns.png

@@ -1,22 +1,26 @@
 # ML Signal Generator
 
-Do daily OHLC technical features predict next-day SPY direction?
+Two studies under the same rules: baselines before ML, walk-forward with no
+leakage, error bars or t-stats on every headline number, costs charged on
+turnover, and negative results reported as findings.
 
-**No - and this repo is built to show that honestly.**
-
-Out-of-sample AUC is indistinguishable from a coin flip, and a long-only signal that is
-long ~57% of days during a bull market **loses to simply buying and holding SPY**. That is
-the expected result for this feature set on a liquid index, and the harness is constructed
-so that it could not have concluded otherwise by accident.
-
-All numbers below are the console output of `python main.py` on the default configuration
-(SPY, 2020-01-01 → 2024-01-01, threshold 0.55, 2 bps cost). Reproduce them with one command.
+Phase 1 asked whether daily OHLC technicals can time SPY day to day. They
+cannot: test AUC is indistinguishable from a coin flip and the long-only signal
+loses to buy-and-hold. Phase 2 changes the question to one where the academic
+prior is not flat: rank the S&P 500 cross-section each month and predict
+relative next-month returns. There the walk-forward models do clear the
+pre-registered significance bar (XGBoost gross long-short Newey-West t = 3.47
+over 149 months), but on a survivorship-biased universe that inflates exactly
+this kind of result, so it reads as an upper bound, not a discovery.
 
 ---
 
-## The headline result
+## Phase 1: timing SPY (negative result)
 
-**Test window: 2023-05-31 → 2023-12-29 (148 rows, 147 backtest days).**
+All phase 1 numbers are the console output of `python main.py` on the default
+configuration (SPY, 2020-01-01 to 2024-01-01, threshold 0.55, 2 bps cost).
+
+**Test window: 2023-05-31 to 2023-12-29 (148 rows, 147 backtest days).**
 
 | | Total Return | Sharpe | Max DD | Days Long |
 |---|---|---|---|---|
@@ -24,159 +28,238 @@ All numbers below are the console output of `python main.py` on the default conf
 | XGBoost | 3.04% | 0.62 | -8.47% | 62.6% |
 | **Buy & Hold SPY** | **13.96%** | **2.20** | -9.97% | 100.0% |
 
-**Excess return vs buy & hold: Random Forest −6.64pp, XGBoost −10.91pp.**
-
-The strategy's Sharpe of 1.56 looks respectable in isolation. It is not. Over the same
-window, doing nothing but holding SPY returned 13.96% at Sharpe 2.20. The strategy is long
-most days of a melt-up, so it captures a fraction of the market's beta and reports it as
-performance. **A long-only signal in a rising market earns beta, not alpha.** Without the
-benchmark column, that distinction is invisible - which is exactly why the benchmark is
-computed with the same metric code and plotted on the same equity curve.
-
-## The model has no measurable edge
+Excess return vs buy & hold: Random Forest -6.64pp, XGBoost -10.91pp. The
+strategy is long most days of a melt-up, so it captures a fraction of the
+market's beta and reports it as performance. A long-only signal in a rising
+market earns beta, not alpha.
 
 ```
 Bootstrap 95% CI on test AUC (2000 resamples):
   Random Forest   AUC 0.5255   95% CI [0.4269, 0.6235]   contains 0.5 - cannot reject coin flip
   XGBoost         AUC 0.5462   95% CI [0.4516, 0.6451]   contains 0.5 - cannot reject coin flip
-```
 
-Point AUCs of 0.5255 and 0.5462 sit above 0.5, and it would be easy to stop reading there
-and call it edge. On 148 daily observations the error bar is roughly ±0.10 - **both
-intervals comfortably contain 0.5**, so a coin flip cannot be ruled out. Reporting the point
-estimate without the interval would be the single easiest way to fool yourself here.
-
-The walk-forward estimate, which averages 5 expanding-window folds over 838 days and is far
-more robust than one 148-day window, agrees:
-
-```
 WALK-FORWARD VALIDATION (expanding window, 5 folds)
   Random Forest  - mean AUC: 0.4997
   XGBoost        - mean AUC: 0.4903
 ```
 
-Both are at or below 0.5. **The honest read is: no edge detected.**
+Both walk-forward AUCs are at or below 0.5: no edge detected. The full phase 1
+write-up (overfitting diagnostic, stationary-feature fix, harness design)
+remains reproducible with `python main.py`.
 
-## Overfitting: caught, not hidden
+Phase 1 is the motivation for phase 2. Timing one liquid index with technicals
+is the hardest version of the question. Ranking a large cross-section on
+standard characteristics is the easier, better-posed one: a long-short
+portfolio has no structural beta to hide behind, and the monthly horizon gives
+non-overlapping observations. Non-overlapping is not the same as independent,
+which is why every t-stat below is Newey-West.
 
-```
-OVERFITTING DIAGNOSTIC (single 70/15 train/val cut)
-  Random Forest  - train acc: 0.9855   val acc: 0.4730   val AUC: 0.4382
-  XGBoost        - train acc: 0.9913   val acc: 0.4797   val AUC: 0.4637
-```
+## Phase 2: cross-sectional ranking
 
-The models classify the training set almost perfectly (98.6% / 99.1%) and then perform at
-or below chance out of sample (47.3% / 48.0%). Tree ensembles will memorise noise in
-financial time series, and this is what it looks like. The point of printing both columns is
-that the walk-forward split *catches* this rather than letting it leak into a headline
-number. A single in-sample fit here would have produced a spectacular and completely fake
-result.
+Question: do standard cross-sectional features (momentum, reversal,
+volatility, 52-week high, liquidity) predict *relative* next-month returns
+across the S&P 500? All phase 2 numbers are the output of
+`python -m src.cross_sectional.run` (run 2026-07-17, data downloaded
+2026-07-17) and live in `outputs/cross_sectional_results.json`.
 
-## Non-stationary features (fixed)
+**Universe.** The 503 current S&P 500 members, fetched once from Wikipedia and
+committed to `data/universe_sp500.csv` so every rerun uses the identical list.
+All 503 downloaded successfully (2010-01-01 to 2026-07-17, raw unadjusted daily
+bars, cached locally). This is TODAY'S index applied retroactively to 2010,
+which is a survivorship-biased design; the caveats section spells out the
+direction of that bias, and it matters for reading every number below.
 
-The model originally received `ma_5d` and `ma_20d` as **absolute dollar prices**. This is a
-subtle and serious bug for tree models:
+**Data.** All returns (features and the forward-return target) come from
+adjusted-close ratios, while dollar volume and the 52-week-high feature come
+from the split-adjusted-only close times volume, because Yahoo folds dividends
+into past prices and that distortion is cross-sectional and correlated with
+dividend yield, the dimension a ranking sorts on.
 
-- Trees cannot extrapolate beyond the range of values seen in training.
-- Training range was `ma_20d ∈ [229.52, 442.07]`; **11 of 148 test rows (7.4%)** fell
-  outside it. Every one of those lands in the same terminal leaf regardless of market state.
-- `ma_20d` was XGBoost's single most important feature (importance 0.159854) - so the
-  top-ranked signal was effectively a **proxy for calendar time**, not for market state.
+**Panel.** Rebalance on the last trading day of each calendar month; the final
+calendar month is always dropped so every forward return spans one complete
+month. A name enters a month once it has 253 trading days of history and all
+six features; a month needs at least 100 eligible names. Result: 186 months,
+2011-01-31 to 2026-06-30, 87,160 name-months, 421 to 499 names per month
+(mean 469). Features are rank-transformed to [0, 1] within each month, so no
+scaler is ever fitted and nothing can leak across time by construction. The
+ML target is the within-month percentile of the forward return: the models
+learn relative ordering, not market direction.
 
-Fixed by feeding the same information in stationary form, `price / ma − 1` (percent distance
-from the moving average). Effect on AUC, reported in both directions:
+**Features.** `mom_12_1` (12-1 momentum), `rev_1m` (short-term reversal),
+`vol_63d` (annualized 63-day volatility), `dist_52w_high` (distance to the
+52-week high), `amihud_63d` (Amihud illiquidity), `log_dollar_vol_63d` (size
+and liquidity proxy; market caps are not available from the batch download,
+and this is the honest substitute).
 
-| | Walk-forward AUC (5 folds, 838 days) | Test AUC (148 days) |
-|---|---|---|
-| RF - raw price MAs | 0.5083 | 0.4945 |
-| RF - stationary MAs | **0.4997** | **0.5255** |
-| XGB - raw price MAs | 0.5027 | 0.4676 |
-| XGB - stationary MAs | **0.4903** | **0.5462** |
+**Baselines first.** B1: momentum rank. B2: negative-reversal rank. B3: an
+equal-weight sum of all six feature ranks with signs fixed by the academic
+prior, no fitting. B3 sees exactly the features the models see; if ML cannot
+beat it, ML adds nothing here.
 
-The fix moved the single-window test AUC **up** and the robust walk-forward AUC **down**.
-Neither move is evidence of anything: an AUC that swings by 0.08 on a change of feature
-*representation alone* is telling you the metric is dominated by noise at this sample size.
-The correct conclusion is not "the fix helped" - it is that **there is no stable signal here
-to help**. The features are now stationary because that is correct practice, not because it
-bought performance. It did not.
+**Walk-forward protocol.** Expanding window, 36-month burn-in, refit every 12
+months. When predicting month t, training uses only samples whose
+forward-return window closed by t (embargo: sample month <= t - 1). Models:
+linear regression, XGBoost (300 trees, depth 4), Random Forest (300 trees,
+depth 8). Every method, including the no-fit baselines and the benchmark, is
+evaluated on the identical window: 2014-01-31 to 2026-05-29, 149 months.
 
-## Why you can trust the negative result
+**Pre-registered headline test**, fixed before any result was seen: the
+Newey-West t-stat on the mean monthly GROSS XGBoost D10-minus-D1 long-short
+return over the common window. The net-of-cost table is the economic qualifier
+on that result. Every other number in this study is descriptive. With several
+methods examined, the conventional t = 2 hurdle is optimistic; Harvey, Liu and
+Zhu argue t near 3 for new factor claims.
 
-A negative result is only worth anything if the harness could have found a positive one. This
-one could have:
+### Results
 
-- **No lookahead.** The target is `Close.shift(-1) / Close - 1`; features at time *t* use
-  only data up to *t*. Signals are applied to the *next* day's return.
-- **No leakage across the split.** Test data is the last 15%, held out entirely. Model
-  selection happens via walk-forward on the first 85% and never touches the test set.
-- **Costs charged on turnover, not on days held.** `Net_t = Gross_t − cost × |Signal_t − Signal_{t−1}|`.
-  Charging per *day held* would have quietly penalised the strategy and made the benchmark
-  comparison flattering by accident.
-- **Benchmarked.** Buy & hold is computed on the identical return series with the identical
-  Sharpe/annualisation code, so the columns are comparable.
-- **Error bars on the headline metric.** Bootstrap CI on test AUC.
+The pre-registered test passes at face value: XGBoost gross long-short
+Newey-West t = 3.47 (lag 4). Face value is the problem, and the caveats below
+are not decoration. Two honest observations up front. First, the classic
+single-factor baselines are flat in this sample: every no-fit baseline has a
+mean IC under 0.01 with a t-stat under 1, and B3's long-short return is
+negative. The fitted models beat B3 decisively, so the value came from fitting
+the weights, not from the academic priors. Second, plain linear regression
+posts the highest mean IC of all six methods (0.027), so most of what the
+trees add over a fitted linear model is portfolio concentration, not rank
+accuracy.
+
+Monthly Spearman rank IC between score and next-month return:
+
+| Method | Mean IC | NW t-stat | % positive months |
+|---|---|---|---|
+| B1 momentum | 0.0054 | 0.39 | 54% |
+| B2 reversal | 0.0053 | 0.43 | 49% |
+| B3 combo | 0.0081 | 0.64 | 58% |
+| Linear | 0.0271 | 2.64 | 54% |
+| XGBoost | 0.0183 | 2.63 | 56% |
+| Random Forest | 0.0255 | 3.05 | 59% |
+
+Mean monthly forward return by score decile (the spread lives in the top
+decile, and B1's D1 shows the loser-bounce pattern that makes shorting past
+losers expensive):
+
+![Decile returns](outputs/xsec_decile_returns.png)
+
+D10-minus-D1 long-short, equal weight within legs, rebalanced monthly, gross.
+Monthly arithmetic returns; annualized return is 12x the mean, vol is
+sqrt(12)x, Sharpe uses rf = 0; max drawdown is the largest peak-to-trough
+decline of the arithmetic cumsum. Turnover is mean one-way traded notional per
+leg per month, weight-based with drift, and the first month's full entry is
+charged:
+
+| Method | Ann return | Ann vol | Sharpe | Max DD | NW t | Turnover L/S | D10-EW (monthly) | NW t |
+|---|---|---|---|---|---|---|---|---|
+| B1 momentum | +6.5% | 20.1% | 0.32 | -42.4% | 1.12 | 0.30 / 0.31 | +0.73% | 2.45 |
+| B2 reversal | -2.2% | 17.7% | -0.13 | -88.0% | -0.48 | 0.87 / 0.86 | +0.12% | 0.54 |
+| B3 combo | -1.3% | 16.6% | -0.08 | -76.2% | -0.31 | 0.37 / 0.40 | +0.08% | 0.63 |
+| Linear | +12.2% | 14.8% | 0.82 | -18.0% | 3.38 | 0.56 / 0.56 | +0.75% | 3.84 |
+| XGBoost | +9.1% | 11.5% | 0.79 | -12.6% | 3.47 | 0.60 / 0.72 | +0.78% | 4.62 |
+| Random Forest | +14.1% | 12.5% | 1.13 | -12.1% | 5.19 | 0.48 / 0.65 | +0.92% | 4.97 |
+| Equal-weight universe (gross) | +16.7% | 15.7% | 1.07 | | | | | |
+
+The equal-weight universe row is the long-only "own everything" alternative.
+It is NOT the comparator for the roughly beta-neutral long-short, which is
+tested against zero; it is the comparator for the long leg, via the D10-EW
+column. That an equal-weight basket of today's survivors returned 16.7% a year
+gross at Sharpe 1.07 is itself a measure of how favorable this sample is.
+
+Net long-short at per-side costs on traded notional,
+`net_t = gross_t - c * (TN_long_t + TN_short_t)`:
+
+| Method | 0 bps | 5 bps | 10 bps | 20 bps |
+|---|---|---|---|---|
+| B1 momentum | +6.5% / 0.32 | +5.8% / 0.29 | +5.0% / 0.25 | +3.6% / 0.18 |
+| B2 reversal | -2.2% / -0.13 | -4.3% / -0.24 | -6.4% / -0.36 | -10.5% / -0.60 |
+| B3 combo | -1.3% / -0.08 | -2.3% / -0.14 | -3.2% / -0.19 | -5.1% / -0.31 |
+| Linear | +12.2% / 0.82 | +10.8% / 0.73 | +9.5% / 0.64 | +6.8% / 0.46 |
+| XGBoost | +9.1% / 0.79 | +7.6% / 0.66 | +6.0% / 0.52 | +2.8% / 0.25 |
+| Random Forest | +14.1% / 1.13 | +12.7% / 1.02 | +11.3% / 0.91 | +8.6% / 0.69 |
+
+(Cells are annualized return / Sharpe.) The XGBoost signal survives 10 bps and
+is largely gone at the 20 bps stress level; Random Forest, with lower
+turnover, degrades more slowly.
+
+### Phase 2 caveats
+
+**Survivorship bias, the big one.** The universe is today's S&P 500 members
+applied retroactively to 2010. Firms that were delisted, acquired at
+distressed prices, or dropped from the index along the way are absent; firms
+that grew into the index are present for their whole pre-inclusion rise. The
+bias inflates results, and it inflates the LONG side and momentum-style
+signals in particular: names that survived into the current index
+disproportionately had strong past returns, so a portfolio that buys past
+winners inside this universe is graded on a sample already filtered for
+winning. Losers that kept losing until they disappeared are exactly the names
+the short side would have profited from, and they are missing. Any positive
+long-side or momentum result here is therefore an upper bound, and a null
+result would be *more* believable, not less, because the deck was stacked in
+the signal's favor. A secondary version of the same filter: names enter the
+panel only once they have 13 months of price history, so current members with
+post-2010 listings appear mid-sample (ABNB's first bar is 2020-12-10, GEV's
+2024-03-27), again a selection for success. The cross-section grows over the
+sample: 421 names in the thinnest month against a mean of 469.
+
+**Costs are optimistic.** 5-10 bps per side is a reasonable range for
+large-cap US names at retail-to-small-institutional size. Short borrow fees,
+financing, and within-month execution slippage are not modeled, so the net
+long-short figures are upper bounds. Monthly close-to-close accounting also
+assumes execution at the closing price of the rebalance day.
+
+**No market caps.** Portfolios are equal-weight and the size proxy is dollar
+volume, because market caps are not available from the batch download. A
+cap-weighted version could look materially different.
+
+**One universe, one period.** 149 evaluation months of one index in a mostly
+rising US market. And with six methods in the tables, the multiple-testing
+caution above applies to every number: the pre-registered XGBoost t = 3.47
+clears the Harvey-Liu-Zhu bar nominally, but it does so on a stacked deck.
 
 ## Reproduce
 
 ```bash
 pip install -r requirements.txt
-python main.py                          # SPY, 2020-2024, defaults - produces every number above
-python main.py --ticker AAPL --start 2021-01-01 --end 2024-01-01
-python main.py --threshold 0.50 --transaction-cost 0.0005
+python main.py                        # phase 1: SPY timing study
+python -m src.cross_sectional.run     # phase 2: full study; downloads and caches prices on first run
+python -m pytest tests/               # unit tests (or: python tests/run_tests.py)
 ```
 
-Data is cached to `data/` on first download, so reruns are deterministic and offline.
-Outputs (`outputs/`): `equity_curve.png` (strategy vs buy & hold), `roc_curve.png`,
-`feature_importance_{rf,xgb}.png`.
-
-## What the pipeline does
-
-- **Data**: daily OHLC via yfinance (Alpha Vantage supported as a fallback; set `API_SOURCE`
-  in `.env`). Cached locally after first fetch.
-- **Features** (all stationary): `return_1d`, `return_5d`, `volatility_20d`,
-  `price_to_ma_5d`, `price_to_ma_20d`, `ma_gap`, `z_score_20`.
-- **Target**: `y = 1` if next-day return > 0, else `0`. (986 rows after NaN drop; 529 up days
-  / 457 down days.)
-- **Split**: last 15% held out as test. Walk-forward (expanding window, `TimeSeriesSplit`,
-  5 folds) over the first 85% selects between Random Forest and XGBoost by mean fold AUC.
-- **Signals**: long if `P(up) > threshold` (default 0.55), else flat. Long-only, so the
-  strategy can never be short - a structural limitation, and the reason the buy & hold
-  comparison matters so much.
-- **Backtest**: total/annualised return, volatility, Sharpe (rf = 0), max drawdown, win rate,
-  turnover-based transaction costs, and the buy & hold benchmark.
-
-## Honest next steps
-
-The result above says the feature set is exhausted, not that the pipeline is. What would
-actually move the needle:
-
-1. **Allow short positions.** Long-only cannot express a bearish view, and structurally
-   guarantees beta contamination in any bull sample.
-2. **Test on a bear or sideways regime** (e.g. 2022). A single 147-day bull window is not
-   enough to conclude anything about the strategy; it is only enough to conclude the strategy
-   did not beat holding.
-3. **Features with a plausible economic reason to predict** - order-flow imbalance, options
-   positioning, realised-vs-implied vol spread. Lagged returns and moving averages on a
-   liquid index are the most heavily arbitraged signals in existence; finding no edge in them
-   is the *prior*, not a surprise.
-4. **Longer horizons.** Next-day direction on SPY is close to the hardest possible target.
-
-Anything that reports a positive result here should be treated as a bug until proven otherwise.
+Phase 2 flags: `--refresh` wipes the price cache and redownloads,
+`--models lin,xgb,rf`, `--costs 0,5,10,20`, `--start 2010-01-01`. The
+committed universe file is frozen; `python -m src.cross_sectional.universe
+--force` re-fetches it from Wikipedia. Prices are cached in `data/` after the
+first download, so reruns are offline and deterministic given the cache. The
+default invocation reproduces every phase 2 number above; it wrote
+`outputs/cross_sectional_results.json` and `outputs/xsec_decile_returns.png`
+in 122.7s on a laptop from the local cache (recorded as `elapsed_seconds`
+in the results JSON).
 
 ## Project structure
 
 ```
 ml-signal-generator/
-├── main.py              # CLI entry point - runs the full pipeline
-├── data/                # Cached OHLC downloads
-├── notebooks/
-│   └── 01_training.ipynb
-├── src/
-│   ├── features.py      # Feature engineering (stationary)
-│   ├── model.py         # Training, walk-forward validation, bootstrap AUC CI
-│   └── backtest.py      # Signals, backtest, buy & hold benchmark
-├── outputs/             # Generated charts
-└── requirements.txt
+|-- main.py                       # phase 1 CLI entry point
+|-- data/
+|   `-- universe_sp500.csv        # committed frozen universe (price cache is gitignored)
+|-- src/
+|   |-- features.py               # phase 1 feature engineering
+|   |-- model.py                  # phase 1 training and validation
+|   |-- backtest.py               # phase 1 backtest and benchmark
+|   `-- cross_sectional/
+|       |-- universe.py           # one-time Wikipedia fetch
+|       |-- data.py               # chunked yfinance download and CSV cache
+|       |-- features.py           # monthly panel, features, rank transforms
+|       |-- baselines.py          # B1 momentum, B2 reversal, B3 combo
+|       |-- models.py             # walk-forward linear / XGBoost / Random Forest
+|       |-- evaluate.py           # IC, NW t-stats, deciles, turnover, costs
+|       |-- plots.py              # decile chart
+|       `-- run.py                # phase 2 entry point
+|-- tests/                        # leakage, feature, and evaluation tests
+|-- notebooks/
+|   `-- 01_training.ipynb
+|-- outputs/
+|   |-- cross_sectional_results.json
+|   `-- xsec_decile_returns.png
+`-- requirements.txt
 ```
 
 ## Disclaimer
