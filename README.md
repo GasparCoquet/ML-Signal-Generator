@@ -1,13 +1,13 @@
 # ML Signal Generator
 
-Two studies under the same rules: baselines before ML, walk-forward with no
+Two studies under the same rules. Baselines before ML, walk-forward with no
 leakage, error bars or t-stats on every headline number, costs charged on
 turnover, and negative results reported as findings.
 
 Phase 1 asked whether daily OHLC technicals can time SPY day to day. They
-cannot: test AUC is indistinguishable from a coin flip and the long-only signal
+cannot. Test AUC is indistinguishable from a coin flip and the long-only signal
 loses to buy-and-hold. Phase 2 changes the question to one where the academic
-prior is not flat: rank the S&P 500 cross-section each month and predict
+prior is not flat. Rank the S&P 500 cross-section each month and predict
 relative next-month returns. There the walk-forward models do clear the
 pre-registered significance bar (XGBoost gross long-short Newey-West t = 3.47
 over 149 months), but on a survivorship-biased universe that inflates exactly
@@ -43,13 +43,13 @@ WALK-FORWARD VALIDATION (expanding window, 5 folds)
   XGBoost        - mean AUC: 0.4903
 ```
 
-Both walk-forward AUCs are at or below 0.5: no edge detected. The full phase 1
+Both walk-forward AUCs are at or below 0.5. No edge detected. The full phase 1
 write-up (overfitting diagnostic, stationary-feature fix, harness design)
 remains reproducible with `python main.py`.
 
 Phase 1 is the motivation for phase 2. Timing one liquid index with technicals
 is the hardest version of the question. Ranking a large cross-section on
-standard characteristics is the easier, better-posed one: a long-short
+standard characteristics is the easier, better-posed one, because a long-short
 portfolio has no structural beta to hide behind, and the monthly horizon gives
 non-overlapping observations. Non-overlapping is not the same as independent,
 which is why every t-stat below is Newey-West.
@@ -66,7 +66,7 @@ across the S&P 500? All phase 2 numbers are the output of
 committed to `data/universe_sp500.csv` so every rerun uses the identical list.
 All 503 downloaded successfully (2010-01-01 to 2026-07-17, raw unadjusted daily
 bars, cached locally). This is TODAY'S index applied retroactively to 2010,
-which is a survivorship-biased design; the caveats section spells out the
+which is a survivorship-biased design. The caveats section spells out the
 direction of that bias, and it matters for reading every number below.
 
 **Data.** All returns (features and the forward-return target) come from
@@ -75,25 +75,25 @@ from the split-adjusted-only close times volume, because Yahoo folds dividends
 into past prices and that distortion is cross-sectional and correlated with
 dividend yield, the dimension a ranking sorts on.
 
-**Panel.** Rebalance on the last trading day of each calendar month; the final
+**Panel.** Rebalance on the last trading day of each calendar month. The final
 calendar month is always dropped so every forward return spans one complete
 month. A name enters a month once it has 253 trading days of history and all
-six features; a month needs at least 100 eligible names. Result: 186 months,
+six features. A month needs at least 100 eligible names. Result: 186 months,
 2011-01-31 to 2026-06-30, 87,160 name-months, 421 to 499 names per month
 (mean 469). Features are rank-transformed to [0, 1] within each month, so no
 scaler is ever fitted and nothing can leak across time by construction. The
-ML target is the within-month percentile of the forward return: the models
+ML target is the within-month percentile of the forward return, so the models
 learn relative ordering, not market direction.
 
 **Features.** `mom_12_1` (12-1 momentum), `rev_1m` (short-term reversal),
 `vol_63d` (annualized 63-day volatility), `dist_52w_high` (distance to the
 52-week high), `amihud_63d` (Amihud illiquidity), `log_dollar_vol_63d` (size
-and liquidity proxy; market caps are not available from the batch download,
-and this is the honest substitute).
+and liquidity proxy, the honest substitute because market caps are not
+available from the batch download).
 
 **Baselines first.** B1: momentum rank. B2: negative-reversal rank. B3: an
 equal-weight sum of all six feature ranks with signs fixed by the academic
-prior, no fitting. B3 sees exactly the features the models see; if ML cannot
+prior, no fitting. B3 sees exactly the features the models see. If ML cannot
 beat it, ML adds nothing here.
 
 **Walk-forward protocol.** Expanding window, 36-month burn-in, refit every 12
@@ -101,21 +101,21 @@ months. When predicting month t, training uses only samples whose
 forward-return window closed by t (embargo: sample month <= t - 1). Models:
 linear regression, XGBoost (300 trees, depth 4), Random Forest (300 trees,
 depth 8). Every method, including the no-fit baselines and the benchmark, is
-evaluated on the identical window: 2014-01-31 to 2026-05-29, 149 months.
+evaluated on the identical window, 2014-01-31 to 2026-05-29, 149 months.
 
-**Pre-registered headline test**, fixed before any result was seen: the
+**Pre-registered headline test**, fixed before any result was seen. It is the
 Newey-West t-stat on the mean monthly GROSS XGBoost D10-minus-D1 long-short
 return over the common window. The net-of-cost table is the economic qualifier
 on that result. Every other number in this study is descriptive. With several
-methods examined, the conventional t = 2 hurdle is optimistic; Harvey, Liu and
+methods examined, the conventional t = 2 hurdle is optimistic. Harvey, Liu and
 Zhu argue t near 3 for new factor claims.
 
 ### Results
 
-The pre-registered test passes at face value: XGBoost gross long-short
+The pre-registered test passes at face value, with XGBoost gross long-short
 Newey-West t = 3.47 (lag 4). Face value is the problem, and the caveats below
 are not decoration. Two honest observations up front. First, the classic
-single-factor baselines are flat in this sample: every no-fit baseline has a
+single-factor baselines are flat in this sample. Every no-fit baseline has a
 mean IC under 0.01 with a t-stat under 1, and B3's long-short return is
 negative. The fitted models beat B3 decisively, so the value came from fitting
 the weights, not from the academic priors. Second, plain linear regression
@@ -141,8 +141,8 @@ losers expensive):
 ![Decile returns](outputs/xsec_decile_returns.png)
 
 D10-minus-D1 long-short, equal weight within legs, rebalanced monthly, gross.
-Monthly arithmetic returns; annualized return is 12x the mean, vol is
-sqrt(12)x, Sharpe uses rf = 0; max drawdown is the largest peak-to-trough
+Monthly arithmetic returns. Annualized return is 12x the mean, vol is
+sqrt(12)x, Sharpe uses rf = 0, and max drawdown is the largest peak-to-trough
 decline of the arithmetic cumsum. Turnover is mean one-way traded notional per
 leg per month, weight-based with drift, and the first month's full entry is
 charged:
@@ -159,7 +159,7 @@ charged:
 
 The equal-weight universe row is the long-only "own everything" alternative.
 It is NOT the comparator for the roughly beta-neutral long-short, which is
-tested against zero; it is the comparator for the long leg, via the D10-EW
+tested against zero. It is the comparator for the long leg, via the D10-EW
 column. That an equal-weight basket of today's survivors returned 16.7% a year
 gross at Sharpe 1.07 is itself a measure of how favorable this sample is.
 
@@ -176,28 +176,28 @@ Net long-short at per-side costs on traded notional,
 | Random Forest | +14.1% / 1.13 | +12.7% / 1.02 | +11.3% / 0.91 | +8.6% / 0.69 |
 
 (Cells are annualized return / Sharpe.) The XGBoost signal survives 10 bps and
-is largely gone at the 20 bps stress level; Random Forest, with lower
+is largely gone at the 20 bps stress level. Random Forest, with lower
 turnover, degrades more slowly.
 
 ### Phase 2 caveats
 
 **Survivorship bias, the big one.** The universe is today's S&P 500 members
 applied retroactively to 2010. Firms that were delisted, acquired at
-distressed prices, or dropped from the index along the way are absent; firms
+distressed prices, or dropped from the index along the way are absent. Firms
 that grew into the index are present for their whole pre-inclusion rise. The
 bias inflates results, and it inflates the LONG side and momentum-style
-signals in particular: names that survived into the current index
+signals in particular. Names that survived into the current index
 disproportionately had strong past returns, so a portfolio that buys past
 winners inside this universe is graded on a sample already filtered for
 winning. Losers that kept losing until they disappeared are exactly the names
 the short side would have profited from, and they are missing. Any positive
 long-side or momentum result here is therefore an upper bound, and a null
 result would be *more* believable, not less, because the deck was stacked in
-the signal's favor. A secondary version of the same filter: names enter the
+the signal's favor. The same filter has a secondary version. Names enter the
 panel only once they have 13 months of price history, so current members with
 post-2010 listings appear mid-sample (ABNB's first bar is 2020-12-10, GEV's
 2024-03-27), again a selection for success. The cross-section grows over the
-sample: 421 names in the thinnest month against a mean of 469.
+sample, with 421 names in the thinnest month against a mean of 469.
 
 **Costs are optimistic.** 5-10 bps per side is a reasonable range for
 large-cap US names at retail-to-small-institutional size. Short borrow fees,
@@ -211,7 +211,7 @@ cap-weighted version could look materially different.
 
 **One universe, one period.** 149 evaluation months of one index in a mostly
 rising US market. And with six methods in the tables, the multiple-testing
-caution above applies to every number: the pre-registered XGBoost t = 3.47
+caution above applies to every number. The pre-registered XGBoost t = 3.47
 clears the Harvey-Liu-Zhu bar nominally, but it does so on a stacked deck.
 
 ## Reproduce
@@ -225,10 +225,10 @@ python -m pytest tests/               # unit tests (or: python tests/run_tests.p
 
 Phase 2 flags: `--refresh` wipes the price cache and redownloads,
 `--models lin,xgb,rf`, `--costs 0,5,10,20`, `--start 2010-01-01`. The
-committed universe file is frozen; `python -m src.cross_sectional.universe
+committed universe file is frozen. `python -m src.cross_sectional.universe
 --force` re-fetches it from Wikipedia. Prices are cached in `data/` after the
 first download, so reruns are offline and deterministic given the cache. The
-default invocation reproduces every phase 2 number above; it wrote
+default invocation reproduces every phase 2 number above. It wrote
 `outputs/cross_sectional_results.json` and `outputs/xsec_decile_returns.png`
 in 122.7s on a laptop from the local cache (recorded as `elapsed_seconds`
 in the results JSON).
