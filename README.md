@@ -254,8 +254,6 @@ ml-signal-generator/
 |       |-- plots.py              # decile chart
 |       `-- run.py                # phase 2 entry point
 |-- tests/                        # leakage, feature, and evaluation tests
-|-- notebooks/
-|   `-- 01_training.ipynb
 |-- outputs/
 |   |-- cross_sectional_results.json
 |   `-- xsec_decile_returns.png
